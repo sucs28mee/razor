@@ -1,4 +1,4 @@
-use crate::util::Spanned;
+use crate::util::{Span, Spanned};
 
 #[derive(Debug, Clone)]
 pub enum Token {
@@ -45,7 +45,7 @@ pub enum LexerError {
 }
 
 impl<'a> Iterator for Lexer<'a> {
-    type Item = Result<Spanned<Token>, Spanned<LexerError>>;
+    type Item = Result<Span<Token>, Span<LexerError>>;
 
     fn next(&mut self) -> Option<Self::Item> {
         // Skip any whitespace.
@@ -70,9 +70,9 @@ impl<'a> Iterator for Lexer<'a> {
 
                 let len = bytes.len();
                 if let Ok(string) = String::from_utf8(bytes) {
-                    Ok(Spanned::new(index, len, Token::Ident(string)))
+                    Ok(Token::Ident(string).spanned(index, len))
                 } else {
-                    Err(Spanned::new(index, len, LexerError::NonUtf8Bytes))
+                    Err(LexerError::NonUtf8Bytes.spanned(index, len))
                 }
             }
             // Literals:
@@ -85,13 +85,9 @@ impl<'a> Iterator for Lexer<'a> {
 
                 let len = bytes.len() + 2;
                 if let Ok(string) = String::from_utf8(bytes) {
-                    Ok(Spanned::new(
-                        index,
-                        len,
-                        Token::Literal(Literal::String(string)),
-                    ))
+                    Ok(Token::Literal(Literal::String(string)).spanned(index, len))
                 } else {
-                    Err(Spanned::new(index, len, LexerError::NonUtf8Bytes))
+                    Err(LexerError::NonUtf8Bytes.spanned(index, len))
                 }
             }
             b'0'..=b'9' => {
@@ -107,52 +103,52 @@ impl<'a> Iterator for Lexer<'a> {
                 let len = bytes.len();
                 if let Ok(string) = String::from_utf8(bytes) {
                     if let Ok(int) = string.parse() {
-                        Ok(Spanned::new(index, len, Token::Literal(Literal::Int(int))))
+                        Ok(Token::Literal(Literal::Int(int)).spanned(index, len))
                     } else {
-                        Err(Spanned::new(index, len, LexerError::IntParseError))
+                        Err(LexerError::IntParseError.spanned(index, len))
                     }
                 } else {
-                    Err(Spanned::new(index, len, LexerError::NonUtf8Bytes))
+                    Err(LexerError::NonUtf8Bytes.spanned(index, len))
                 }
             }
             // Braces:
             //---------------------@
-            b'{' => Ok(Spanned::one(
+            b'{' => Ok(Span::one(
                 index,
                 Token::Brace {
                     open: false,
                     kind: BraceKind::Curly,
                 },
             )),
-            b'}' => Ok(Spanned::one(
+            b'}' => Ok(Span::one(
                 index,
                 Token::Brace {
                     open: false,
                     kind: BraceKind::Curly,
                 },
             )),
-            b'(' => Ok(Spanned::one(
+            b'(' => Ok(Span::one(
                 index,
                 Token::Brace {
                     open: true,
                     kind: BraceKind::Smooth,
                 },
             )),
-            b')' => Ok(Spanned::one(
+            b')' => Ok(Span::one(
                 index,
                 Token::Brace {
                     open: false,
                     kind: BraceKind::Smooth,
                 },
             )),
-            b'[' => Ok(Spanned::one(
+            b'[' => Ok(Span::one(
                 index,
                 Token::Brace {
                     open: true,
                     kind: BraceKind::Square,
                 },
             )),
-            b']' => Ok(Spanned::one(
+            b']' => Ok(Span::one(
                 index,
                 Token::Brace {
                     open: false,
@@ -162,8 +158,8 @@ impl<'a> Iterator for Lexer<'a> {
             // Other:
             // -------------------------------------@
             b':' => match self.bytes.get(1) {
-                Some(b'=') => Ok(Spanned::new(index, 2, Token::Assignment { mutable: false })),
-                _ => Err(Spanned::one(
+                Some(b'=') => Ok(Token::Assignment { mutable: false }.spanned(index, 2)),
+                _ => Err(Span::one(
                     index + 1,
                     LexerError::ExpectedCharacter {
                         expected: b'=' as char,
@@ -171,16 +167,16 @@ impl<'a> Iterator for Lexer<'a> {
                     },
                 )),
             },
-            b';' => Ok(Spanned::one(index, Token::SemiColon)),
-            byte => Err(Spanned::one(
+            b';' => Ok(Span::one(index, Token::SemiColon)),
+            byte => Err(Span::one(
                 index,
                 LexerError::UnexpectedCharacter(*byte as char),
             )),
         };
 
-        if let Ok(Spanned { len, .. }) = token {
+        if let Ok(span) = token.as_ref() {
             // Skip the parsed token.
-            self.bytes = &self.bytes[len.min(self.bytes.len())..];
+            self.bytes = &self.bytes[span.len().min(self.bytes.len())..];
         }
 
         Some(token)

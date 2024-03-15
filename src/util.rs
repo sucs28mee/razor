@@ -1,13 +1,13 @@
-use std::fmt::Debug;
+use std::{fmt::Debug, ops::Range};
 
 #[derive(Debug)]
-pub struct Spanned<T> {
-    pub index: usize,
-    pub len: usize,
-    pub value: T,
+pub struct Span<T> {
+    index: usize,
+    len: usize,
+    value: T,
 }
 
-impl<T> Spanned<T> {
+impl<T> Span<T> {
     pub fn new(index: usize, len: usize, value: T) -> Self {
         Self { index, len, value }
     }
@@ -19,4 +19,24 @@ impl<T> Spanned<T> {
             value,
         }
     }
+
+    pub fn index(&self) -> usize {
+        self.index
+    }
+
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    pub fn range(&self) -> Range<usize> {
+        self.index..self.index + self.len
+    }
 }
+
+pub trait Spanned: Sized {
+    fn spanned(self, index: usize, len: usize) -> Span<Self> {
+        Span::new(index, len, self)
+    }
+}
+
+impl<T> Spanned for T {}
