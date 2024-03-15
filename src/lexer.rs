@@ -1,17 +1,51 @@
+use std::str::FromStr;
+
 use crate::util::{Span, Spanned};
 
 #[derive(Debug, Clone)]
 pub enum Token {
     Ident(String),
-    FunctionIdent(String),
-    Assignment { mutable: bool },
+    Assignment(AssignmentKind),
+    Eq,
     Brace { open: bool, kind: BraceKind },
+    QuestionMark,
     SemiColon,
-    Literal(Literal),
+    Colon,
+    Ampersand,
+    Comma,
+    Literal(LiteralKind),
+    Keyword(KeywordKind),
 }
 
 #[derive(Debug, Clone)]
-pub enum Literal {
+pub enum KeywordKind {
+    Struct,
+    Fn,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct UnknownKeywordError;
+
+impl FromStr for KeywordKind {
+    type Err = UnknownKeywordError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "struct" => Ok(KeywordKind::Struct),
+            "fn" => Ok(KeywordKind::Fn),
+            _ => Err(UnknownKeywordError),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum AssignmentKind {
+    Normal,
+    Optional,
+}
+
+#[derive(Debug, Clone)]
+pub enum LiteralKind {
     String(String),
     Int(i32),
     Float(f32),
@@ -41,7 +75,6 @@ impl<'a> Lexer<'a> {
 #[derive(Debug, Clone, Copy)]
 pub enum LexerError {
     UnexpectedCharacter(char),
-    ExpectedCharacter { expected: char, found: Option<char> },
     NumberParseError,
     NonUtf8Bytes,
 }
@@ -59,7 +92,7 @@ impl<'a> Iterator for Lexer<'a> {
                         .map_while(|i| {
                             bytes
                                 .get(i)
-                                .filter(|byte| matches!(byte, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_'))
+                                .filter(|byte| matches!(byte, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b'.'))
                                 .copied()
                         })
                         .collect::<Vec<_>>();
@@ -68,6 +101,10 @@ impl<'a> Iterator for Lexer<'a> {
                     let Ok(string) = String::from_utf8(bytes) else {
                         return (Err(LexerError::NonUtf8Bytes), len);
                     };
+
+                    if let Ok(keyword) = string.parse() {
+                        return (Ok(Token::Keyword(keyword)), len);
+                    }
 
                     (Ok(Token::Ident(string)), len)
                 }
@@ -84,7 +121,7 @@ impl<'a> Iterator for Lexer<'a> {
                         return (Err(LexerError::NonUtf8Bytes), len);
                     };
 
-                    (Ok(Token::Literal(Literal::String(string))), len)
+                    (Ok(Token::Literal(LiteralKind::String(string))), len)
                 }
                 b'0'..=b'9' | b'.' => {
                     let bytes = (0..)
@@ -102,11 +139,11 @@ impl<'a> Iterator for Lexer<'a> {
                     };
 
                     if let Ok(int) = string.parse() {
-                        return (Ok(Token::Literal(Literal::Int(int))), len);
+                        return (Ok(Token::Literal(LiteralKind::Int(int))), len);
                     }
 
                     if let Ok(float) = string.parse() {
-                        return (Ok(Token::Literal(Literal::Float(float))), len);
+                        return (Ok(Token::Literal(LiteralKind::Float(float))), len);
                     }
 
                     (Err(LexerError::NumberParseError), len)
@@ -157,17 +194,24 @@ impl<'a> Iterator for Lexer<'a> {
                 ),
                 // Other:
                 // -------------------------------------@
-                b':' => match bytes.get(1) {
-                    Some(b'=') => (Ok(Token::Assignment { mutable: false }), 2),
-                    _ => (
-                        Err(LexerError::ExpectedCharacter {
-                            expected: b'=' as char,
-                            found: bytes.get(1).copied().map(|byte| byte as char),
-                        }),
-                        2,
-                    ),
-                },
+                b':' => {
+                    if let Some(b'=') = bytes.get(1) {
+                        (Ok(Token::Assignment(AssignmentKind::Normal)), 2)
+                    } else {
+                        (Ok(Token::Colon), 1)
+                    }
+                }
+                b'?' => {
+                    if let Some(b'=') = bytes.get(1) {
+                        (Ok(Token::Assignment(AssignmentKind::Optional)), 2)
+                    } else {
+                        (Ok(Token::QuestionMark), 1)
+                    }
+                }
                 b';' => (Ok(Token::SemiColon), 1),
+                b'&' => (Ok(Token::Ampersand), 1),
+                b',' => (Ok(Token::Comma), 1),
+                b'=' => (Ok(Token::Eq), 1),
                 byte => (Err(LexerError::UnexpectedCharacter(byte as char)), 1),
             }
         }
