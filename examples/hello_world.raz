@@ -1,3 +1,4 @@
 main := () {
     print("Hello world!");
+    x := 92.9;
 }

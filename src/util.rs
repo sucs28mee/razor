@@ -4,22 +4,10 @@ use std::{fmt::Debug, ops::Range};
 pub struct Span<T> {
     index: usize,
     len: usize,
-    value: T,
+    pub value: T,
 }
 
 impl<T> Span<T> {
-    pub fn new(index: usize, len: usize, value: T) -> Self {
-        Self { index, len, value }
-    }
-
-    pub fn one(index: usize, value: T) -> Self {
-        Self {
-            index,
-            len: 1,
-            value,
-        }
-    }
-
     pub fn index(&self) -> usize {
         self.index
     }
@@ -31,11 +19,36 @@ impl<T> Span<T> {
     pub fn range(&self) -> Range<usize> {
         self.index..self.index + self.len
     }
+
+    pub fn map<E, F: FnOnce(T) -> E>(self, f: F) -> Span<E> {
+        Span {
+            index: self.index,
+            len: self.len,
+            value: f(self.value),
+        }
+    }
+}
+
+impl<T, E> From<Span<Result<T, E>>> for Result<Span<T>, Span<E>> {
+    fn from(span: Span<Result<T, E>>) -> Self {
+        match span.value {
+            Ok(value) => Ok(value.spanned(span.index, span.len)),
+            Err(err) => Err(err.spanned(span.index, span.len)),
+        }
+    }
 }
 
 pub trait Spanned: Sized {
     fn spanned(self, index: usize, len: usize) -> Span<Self> {
-        Span::new(index, len, self)
+        Span {
+            index,
+            len,
+            value: self,
+        }
+    }
+
+    fn spanned_one(self, index: usize) -> Span<Self> {
+        self.spanned(index, 1)
     }
 }
 
