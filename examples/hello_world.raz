@@ -9,7 +9,7 @@ LinkedList := struct(value: int, next: &LinkedList?) {
         loop next ?= node.next {
             node = next;
         }
-    
+        !
         node.next = &LinkedList(value, ?);
     }
 }

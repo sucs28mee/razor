@@ -8,7 +8,7 @@ pub struct Span<T> {
 }
 
 impl<T> Span<T> {
-    pub fn index(&self) -> usize {
+    pub fn start(&self) -> usize {
         self.index
     }
 
@@ -17,7 +17,11 @@ impl<T> Span<T> {
     }
 
     pub fn range(&self) -> Range<usize> {
-        self.index..self.index + self.len
+        self.index..self.end()
+    }
+
+    pub fn end(&self) -> usize {
+        self.index + self.len
     }
 
     pub fn map<E, F: FnOnce(T) -> E>(self, f: F) -> Span<E> {
@@ -53,3 +57,23 @@ pub trait Spanned: Sized {
 }
 
 impl<T> Spanned for T {}
+
+pub fn map_spans<'a, T, I, F>(
+    spans: impl IntoIterator<IntoIter = I>,
+    str: &str,
+    mut f: F,
+) -> Option<String>
+where
+    T: 'a,
+    I: DoubleEndedIterator<Item = &'a Span<T>>,
+    F: FnMut(&str) -> String,
+{
+    let (res, index) = spans
+        .into_iter()
+        .try_fold((String::new(), 0), |(acc, index), span| {
+            let (prev, fmt) = (str.get(index..span.start())?, str.get(span.range())?);
+            Some((format!("{acc}{prev}{}", f(fmt)), span.end()))
+        })?;
+
+    Some(format!("{res}{}", str.get(index..)?))
+}

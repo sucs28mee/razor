@@ -11,7 +11,7 @@ fn main() {
     let (tokens, errors) = lexer::Lexer::new(&bytes).fold(
         (Vec::new(), Vec::new()),
         |(mut tokens, mut errors), span| {
-            let (index, len) = (span.index(), span.len());
+            let (index, len) = (span.start(), span.len());
             match span.value {
                 Ok(token) => tokens.push(token.spanned(index, len)),
                 Err(error) => errors.push(error.spanned(index, len)),
@@ -20,9 +20,13 @@ fn main() {
         },
     );
 
-    println!("\nErrors:\n");
-    for (i, error) in errors.into_iter().enumerate() {
-        println!("{i}: {:?}", error);
+    let code = String::from_utf8_lossy(&bytes);
+    if !errors.is_empty() {
+        println!("\nLexer Errors:\n");
+        println!(
+            "{}",
+            util::map_spans(&errors, &*code, |str| format!("\x1b[41m{str}\x1b[0m")).expect("xd")
+        );
     }
 
     println!("\nTokens:\n");
