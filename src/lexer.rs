@@ -14,7 +14,7 @@ pub enum Token {
     Dot,
     Ampersand,
     Comma,
-    Literal(LiteralKind),
+    Literal { value: String, kind: LiteralKind },
     Keyword(KeywordKind),
     Arrow,
 }
@@ -58,9 +58,9 @@ pub enum AssignmentKind {
 
 #[derive(Debug, Clone)]
 pub enum LiteralKind {
-    String(String),
-    Int(i32),
-    Float(f32),
+    String,
+    Int,
+    Float,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -88,7 +88,7 @@ impl<'a> Lexer<'a> {
 pub enum LexerError {
     UnexpectedCharacter(char),
     ExpectedCharacter { expected: char, found: Option<char> },
-    NumberParseError,
+    NumberLiteralParseError,
     NonUtf8Bytes,
 }
 
@@ -97,6 +97,58 @@ impl<'a> Iterator for Lexer<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         fn parse(first: u8, bytes: &[u8]) -> (Result<Token, LexerError>, usize) {
+            fn parse_number_literal(bytes: &[u8]) -> (Result<Token, LexerError>, usize) {
+                let bytes = (0..)
+                    .map_while(|i| {
+                        bytes
+                            .get(i)
+                            .filter(|byte| matches!(byte, b'0'..=b'9' | b'.'))
+                            .copied()
+                    })
+                    .collect::<Vec<_>>();
+
+                let len = bytes.len();
+                let Ok(value) = String::from_utf8(bytes) else {
+                    return (Err(LexerError::NonUtf8Bytes), len);
+                };
+
+                if value.bytes().all(|byte| matches!(byte, b'0'..=b'9')) {
+                    return (
+                        Ok(Token::Literal {
+                            value,
+                            kind: LiteralKind::Int,
+                        }),
+                        len,
+                    );
+                }
+
+                if value
+                    .bytes()
+                    .try_fold(false, |found_dot, byte| match byte {
+                        b'.' => {
+                            if found_dot {
+                                None
+                            } else {
+                                Some(true)
+                            }
+                        }
+                        b'0'..=b'9' => Some(found_dot),
+                        _ => None,
+                    })
+                    .is_some()
+                {
+                    return (
+                        Ok(Token::Literal {
+                            value,
+                            kind: LiteralKind::Float,
+                        }),
+                        len,
+                    );
+                }
+
+                (Err(LexerError::NumberLiteralParseError), len)
+            }
+
             match first {
                 // Identifiers and keywords:
                 // --------------------------@
@@ -130,37 +182,19 @@ impl<'a> Iterator for Lexer<'a> {
                         .collect::<Vec<_>>();
 
                     let len = bytes.len() + 2;
-                    let Ok(string) = String::from_utf8(bytes) else {
+                    let Ok(value) = String::from_utf8(bytes) else {
                         return (Err(LexerError::NonUtf8Bytes), len);
                     };
 
-                    (Ok(Token::Literal(LiteralKind::String(string))), len)
+                    (
+                        Ok(Token::Literal {
+                            value,
+                            kind: LiteralKind::String,
+                        }),
+                        len,
+                    )
                 }
-                b'0'..=b'9' => {
-                    let bytes = (0..)
-                        .map_while(|i| {
-                            bytes
-                                .get(i)
-                                .filter(|byte| matches!(byte, b'0'..=b'9' | b'.'))
-                                .copied()
-                        })
-                        .collect::<Vec<_>>();
-
-                    let len = bytes.len();
-                    let Ok(string) = String::from_utf8(bytes) else {
-                        return (Err(LexerError::NonUtf8Bytes), len);
-                    };
-
-                    if let Ok(int) = string.parse() {
-                        return (Ok(Token::Literal(LiteralKind::Int(int))), len);
-                    }
-
-                    if let Ok(float) = string.parse() {
-                        return (Ok(Token::Literal(LiteralKind::Float(float))), len);
-                    }
-
-                    (Err(LexerError::NumberParseError), len)
-                }
+                b'0'..=b'9' => parse_number_literal(bytes),
                 // Braces:
                 //---------------------@
                 b'{' => (
@@ -238,7 +272,13 @@ impl<'a> Iterator for Lexer<'a> {
                         )
                     }
                 }
-                b'.' => (Ok(Token::Dot), 1),
+                b'.' => {
+                    if matches!(bytes.get(1), Some(b'0'..=b'9')) {
+                        parse_number_literal(bytes)
+                    } else {
+                        (Ok(Token::Dot), 1)
+                    }
+                }
                 byte => (Err(LexerError::UnexpectedCharacter(byte as char)), 1),
             }
         }

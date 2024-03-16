@@ -1,4 +1,5 @@
 mod lexer;
+mod parser;
 mod util;
 
 use std::{env, fs};
@@ -30,8 +31,12 @@ fn main() {
         );
     }
 
-    println!("\nTokens:\n");
-    for (i, token) in tokens.into_iter().enumerate() {
-        println!("{i}: {:?}", token);
+    // println!("\nTokens:\n");
+    // for (i, token) in tokens.into_iter().enumerate() {
+    //     println!("{i}: {:?}", token);
+    // }
+
+    for item in parser::Parser::new(tokens) {
+        println!("{:?}", item);
     }
 }

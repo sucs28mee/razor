@@ -1,6 +1,6 @@
 main := fn () {
     println("Hello world!");
-    node := Node.new(2).has_next();
+    node := Node.new(.2);
 
     // Illegal
     // node.value = 23;

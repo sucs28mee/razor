@@ -1,6 +1,9 @@
-use std::{fmt::Debug, ops::Range};
+use std::{
+    fmt::Debug,
+    ops::{Deref, DerefMut, Range},
+};
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct Span<T> {
     index: usize,
     len: usize,
@@ -30,6 +33,20 @@ impl<T> Span<T> {
             len: self.len,
             value: f(self.value),
         }
+    }
+}
+
+impl<T> Deref for Span<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.value
+    }
+}
+
+impl<T> DerefMut for Span<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.value
     }
 }
 
