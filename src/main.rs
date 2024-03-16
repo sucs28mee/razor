@@ -8,6 +8,7 @@ use crate::util::Spanned;
 fn main() {
     let path = env::args().nth(1).expect("Expected a path argument.");
     let bytes = fs::read(path).expect("IO Error");
+
     let (tokens, errors) = lexer::Lexer::new(&bytes).fold(
         (Vec::new(), Vec::new()),
         |(mut tokens, mut errors), span| {

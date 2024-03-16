@@ -1,0 +1,32 @@
+main := fn () {
+    println("Hello world!");
+    node := Node.new(2).has_next();
+
+    // Illegal
+    // node.value = 23;
+
+    // Legal
+    println(node.value);
+}
+
+Node := struct (
+    pub get value: int,
+    next: &Node?
+) {
+    pub new := fn (value: int) -> Node {
+        Node(value, ?)
+    }
+
+    pub push := fn (self, value: int) {
+        node := self;
+        for next ?= node.next {
+            node = next;
+        }
+
+        node.next = &Node(value, ?);
+    }
+
+    pub has_next := fn (self) -> bool {
+        self.next?
+    }
+}

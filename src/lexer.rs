@@ -11,16 +11,23 @@ pub enum Token {
     QuestionMark,
     SemiColon,
     Colon,
+    Dot,
     Ampersand,
     Comma,
     Literal(LiteralKind),
     Keyword(KeywordKind),
+    Arrow,
 }
 
 #[derive(Debug, Clone)]
 pub enum KeywordKind {
     Struct,
     Fn,
+    For,
+    Pub,
+    If,
+    Else,
+    Get,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -33,6 +40,11 @@ impl FromStr for KeywordKind {
         match s {
             "struct" => Ok(KeywordKind::Struct),
             "fn" => Ok(KeywordKind::Fn),
+            "for" => Ok(KeywordKind::For),
+            "pub" => Ok(KeywordKind::Pub),
+            "if" => Ok(KeywordKind::If),
+            "else" => Ok(KeywordKind::Else),
+            "get" => Ok(KeywordKind::Get),
             _ => Err(UnknownKeywordError),
         }
     }
@@ -75,6 +87,7 @@ impl<'a> Lexer<'a> {
 #[derive(Debug, Clone, Copy)]
 pub enum LexerError {
     UnexpectedCharacter(char),
+    ExpectedCharacter { expected: char, found: Option<char> },
     NumberParseError,
     NonUtf8Bytes,
 }
@@ -92,7 +105,7 @@ impl<'a> Iterator for Lexer<'a> {
                         .map_while(|i| {
                             bytes
                                 .get(i)
-                                .filter(|byte| matches!(byte, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b'.'))
+                                .filter(|byte| matches!(byte, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_'))
                                 .copied()
                         })
                         .collect::<Vec<_>>();
@@ -123,7 +136,7 @@ impl<'a> Iterator for Lexer<'a> {
 
                     (Ok(Token::Literal(LiteralKind::String(string))), len)
                 }
-                b'0'..=b'9' | b'.' => {
+                b'0'..=b'9' => {
                     let bytes = (0..)
                         .map_while(|i| {
                             bytes
@@ -212,6 +225,20 @@ impl<'a> Iterator for Lexer<'a> {
                 b'&' => (Ok(Token::Ampersand), 1),
                 b',' => (Ok(Token::Comma), 1),
                 b'=' => (Ok(Token::Eq), 1),
+                b'-' => {
+                    if let Some(b'>') = bytes.get(1) {
+                        (Ok(Token::Arrow), 2)
+                    } else {
+                        (
+                            Err(LexerError::ExpectedCharacter {
+                                expected: b'>' as char,
+                                found: bytes.get(1).map(|byte| *byte as char),
+                            }),
+                            2,
+                        )
+                    }
+                }
+                b'.' => (Ok(Token::Dot), 1),
                 byte => (Err(LexerError::UnexpectedCharacter(byte as char)), 1),
             }
         }
@@ -219,6 +246,19 @@ impl<'a> Iterator for Lexer<'a> {
         // Skip any whitespace.
         while self.bytes.first()?.is_ascii_whitespace() {
             self.bytes = &self.bytes[1..];
+        }
+
+        // Skip comments.
+        while (b'/', b'/') == (*self.bytes.get(0)?, *self.bytes.get(1)?) {
+            self.bytes = &self.bytes[2..];
+            while *self.bytes.first()? != b'\n' {
+                self.bytes = &self.bytes[1..];
+            }
+
+            // Skip any whitespace after comments.
+            while self.bytes.first()?.is_ascii_whitespace() {
+                self.bytes = &self.bytes[1..];
+            }
         }
 
         // The starting index of the next token.
