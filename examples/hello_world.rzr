@@ -2,13 +2,14 @@ main := fn () {
     println("Hello world!");
     node := Node.new(.2);
 
-    // Illegal
-    // node.value = 23;
+    # Illegal
+    # node.value = 23;
 
-    // Legal
+    # Legal
     println(node.value);
 }
 
+#!
 Node := struct (
     pub get value: int,
     next: &Node?
@@ -30,3 +31,4 @@ Node := struct (
         self.next?
     }
 }
+!#

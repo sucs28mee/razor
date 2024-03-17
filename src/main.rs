@@ -1,5 +1,6 @@
+mod expr_tree;
 mod lexer;
-mod parser;
+// mod _parser;
 mod util;
 
 use std::{env, fs};
@@ -10,33 +11,38 @@ fn main() {
     let path = env::args().nth(1).expect("Expected a path argument.");
     let bytes = fs::read(path).expect("IO Error");
 
-    let (tokens, errors) = lexer::Lexer::new(&bytes).fold(
+    let (tokens, errors) = lexer::tokenize(bytes).fold(
         (Vec::new(), Vec::new()),
         |(mut tokens, mut errors), span| {
-            let (index, len) = (span.start(), span.len());
+            let range = span.range();
             match span.value {
-                Ok(token) => tokens.push(token.spanned(index, len)),
-                Err(error) => errors.push(error.spanned(index, len)),
+                Ok(token) => tokens.push(token.spanned(range)),
+                Err(error) => errors.push(error.spanned(range)),
             }
             (tokens, errors)
         },
     );
 
-    let code = String::from_utf8_lossy(&bytes);
-    if !errors.is_empty() {
-        println!("\nLexer Errors:\n");
-        println!(
-            "{}",
-            util::map_spans(&errors, &*code, |str| format!("\x1b[41m{str}\x1b[0m")).expect("xd")
-        );
-    }
+    // let code = String::from_utf8_lossy(&bytes);
+    // if !errors.is_empty() {
+    //     println!("\nLexer Errors:\n");
+    //     println!(
+    //         "{}",
+    //         util::map_spans(&errors, &*code, |str| format!("\x1b[41m{str}\x1b[0m")).expect("xd")
+    //     );
 
-    // println!("\nTokens:\n");
-    // for (i, token) in tokens.into_iter().enumerate() {
-    //     println!("{i}: {:?}", token);
+    //     for error in errors {
+    //         println!("{:?}", error.value);
+    //     }
     // }
 
-    for item in parser::Parser::new(tokens) {
-        println!("{:?}", item);
+    println!("\nTokens:\n");
+    for (i, token) in tokens.iter().enumerate() {
+        println!("{i}: {:?}", token);
     }
+
+    // println!("\nItems:\n");
+    // for item in _parser::Parser::new(tokens) {
+    //     println!("{:?}", item);
+    // }
 }

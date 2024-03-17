@@ -1,6 +1,17 @@
-use std::str::FromStr;
+use std::{iter::Peekable, str::FromStr};
 
 use crate::util::{Span, Spanned};
+
+pub fn tokenize<I, B>(bytes: B) -> TokenIter<I>
+where
+    I: Iterator<Item = u8>,
+    B: IntoIterator<IntoIter = I>,
+{
+    TokenIter {
+        bytes: bytes.into_iter().peekable(),
+        index: 0,
+    }
+}
 
 #[derive(Debug, Clone)]
 pub enum Token {
@@ -15,12 +26,21 @@ pub enum Token {
     Ampersand,
     Comma,
     Literal { value: String, kind: LiteralKind },
-    Keyword(KeywordKind),
+    Keyword(Keyword),
     Arrow,
+    Operator(Operator),
 }
 
 #[derive(Debug, Clone)]
-pub enum KeywordKind {
+pub enum Operator {
+    Plus,
+    Minus,
+    Star,
+    Slash,
+}
+
+#[derive(Debug, Clone)]
+pub enum Keyword {
     Struct,
     Fn,
     For,
@@ -28,23 +48,25 @@ pub enum KeywordKind {
     If,
     Else,
     Get,
+    As,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct UnknownKeywordError;
 
-impl FromStr for KeywordKind {
+impl FromStr for Keyword {
     type Err = UnknownKeywordError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "struct" => Ok(KeywordKind::Struct),
-            "fn" => Ok(KeywordKind::Fn),
-            "for" => Ok(KeywordKind::For),
-            "pub" => Ok(KeywordKind::Pub),
-            "if" => Ok(KeywordKind::If),
-            "else" => Ok(KeywordKind::Else),
-            "get" => Ok(KeywordKind::Get),
+            "struct" => Ok(Keyword::Struct),
+            "fn" => Ok(Keyword::Fn),
+            "for" => Ok(Keyword::For),
+            "pub" => Ok(Keyword::Pub),
+            "if" => Ok(Keyword::If),
+            "else" => Ok(Keyword::Else),
+            "get" => Ok(Keyword::Get),
+            "as" => Ok(Keyword::As),
             _ => Err(UnknownKeywordError),
         }
     }
@@ -70,242 +92,220 @@ pub enum BraceKind {
     Smooth,
 }
 
-pub struct Lexer<'a> {
-    len: usize,
-    bytes: &'a [u8],
+#[derive(Debug, Clone, Copy)]
+pub enum LexerError {
+    UnexpectedCharacter(u8),
+    NonUtf8Bytes,
 }
 
-impl<'a> Lexer<'a> {
-    pub fn new(bytes: &'a [u8]) -> Self {
-        Self {
-            len: bytes.len(),
-            bytes,
+pub struct TokenIter<I: Iterator<Item = u8>> {
+    bytes: Peekable<I>,
+    index: usize,
+}
+
+impl<I: Iterator<Item = u8>> TokenIter<I> {
+    fn peek_byte(&mut self) -> Option<u8> {
+        self.bytes.peek().map(|byte| byte).copied()
+    }
+
+    /// Returns the next byte in the byte iterator and adds to the index.
+    fn next_byte(&mut self) -> Option<u8> {
+        let next = self.bytes.next()?;
+        self.index += 1;
+
+        Some(next)
+    }
+
+    /// Collects bytes into a [`Vec`] until `f` returns `false`.
+    fn collect_bytes<F: FnMut(u8) -> bool>(&mut self, mut vec: Vec<u8>, mut f: F) -> Vec<u8> {
+        while let Some(byte) = self.peek_byte() {
+            if !f(byte) {
+                break;
+            }
+
+            _ = self.next_byte();
+            vec.push(byte);
+        }
+
+        vec
+    }
+
+    /// Parses the next [`Token`].
+    fn next_token(&mut self, byte: u8) -> Result<Token, LexerError> {
+        match byte {
+            b'a'..=b'z' | b'A'..=b'Z' => {
+                let bytes = self.collect_bytes(
+                    vec![byte],
+                    |byte| matches!(byte, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_'),
+                );
+
+                // The bytes here can never be non UTF8 because of the checks above.
+                let string = unsafe { String::from_utf8_unchecked(bytes) };
+
+                if let Ok(keyword) = string.parse() {
+                    return Ok(Token::Keyword(keyword));
+                }
+
+                Ok(Token::Ident(string))
+            }
+            // TODO: Add support for escape characters.
+            b'"' => {
+                let bytes = self.collect_bytes(vec![], |byte| byte != b'"');
+                // Skip another '"'
+                _ = self.next_byte();
+
+                let Ok(value) = String::from_utf8(bytes) else {
+                    return Err(LexerError::NonUtf8Bytes);
+                };
+
+                Ok(Token::Literal {
+                    value,
+                    kind: LiteralKind::String,
+                })
+            }
+            b'0'..=b'9' | b'.' | b'-' => {
+                // This checks if `byte` or the next byte is numeric.
+                // If so it proceeds to parse a number otherwise parses the other possible tokens.
+                match (byte, self.peek_byte()) {
+                    (_, Some(b'0'..=b'9')) => {}
+                    (b'.', _) => {
+                        return Ok(Token::Dot);
+                    }
+                    (b'-', _) => {
+                        return if let Some(b'>') = self.peek_byte() {
+                            _ = self.next_byte();
+                            Ok(Token::Arrow)
+                        } else {
+                            Ok(Token::Operator(Operator::Minus))
+                        };
+                    }
+                    _ => {}
+                }
+
+                let mut dot = byte == b'.';
+                let bytes = self.collect_bytes(vec![byte], |byte| match byte {
+                    b'0'..=b'9' => true,
+                    b'.' => {
+                        if dot {
+                            return false;
+                        }
+
+                        dot = true;
+                        true
+                    }
+                    _ => false,
+                });
+
+                // The bytes here can never be non UTF8 because of the checks above.
+                let value = unsafe { String::from_utf8_unchecked(bytes) };
+
+                if dot {
+                    return Ok(Token::Literal {
+                        value,
+                        kind: LiteralKind::Float,
+                    });
+                }
+
+                Ok(Token::Literal {
+                    value,
+                    kind: LiteralKind::Int,
+                })
+            }
+            b'{' => Ok(Token::Brace {
+                open: true,
+                kind: BraceKind::Curly,
+            }),
+            b'}' => Ok(Token::Brace {
+                open: false,
+                kind: BraceKind::Curly,
+            }),
+            b'(' => Ok(Token::Brace {
+                open: true,
+                kind: BraceKind::Smooth,
+            }),
+            b')' => Ok(Token::Brace {
+                open: false,
+                kind: BraceKind::Smooth,
+            }),
+            b'[' => Ok(Token::Brace {
+                open: true,
+                kind: BraceKind::Square,
+            }),
+
+            b']' => Ok(Token::Brace {
+                open: false,
+                kind: BraceKind::Square,
+            }),
+
+            // Other:
+            // -------------------------------------@
+            b':' => {
+                if let Some(b'=') = self.peek_byte() {
+                    _ = self.next_byte();
+                    Ok(Token::Assignment(AssignmentKind::Normal))
+                } else {
+                    Ok(Token::Colon)
+                }
+            }
+            b'?' => {
+                if let Some(b'=') = self.peek_byte() {
+                    _ = self.next_byte();
+                    Ok(Token::Assignment(AssignmentKind::Optional))
+                } else {
+                    Ok(Token::QuestionMark)
+                }
+            }
+            b';' => Ok(Token::SemiColon),
+            b'&' => Ok(Token::Ampersand),
+            b',' => Ok(Token::Comma),
+            b'=' => Ok(Token::Eq),
+            b'+' => Ok(Token::Operator(Operator::Plus)),
+            b'*' => Ok(Token::Operator(Operator::Star)),
+            b'/' => Ok(Token::Operator(Operator::Slash)),
+            _ => Err(LexerError::UnexpectedCharacter(byte)),
         }
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum LexerError {
-    UnexpectedCharacter(char),
-    ExpectedCharacter { expected: char, found: Option<char> },
-    NumberLiteralParseError,
-    NonUtf8Bytes,
-}
-
-impl<'a> Iterator for Lexer<'a> {
+impl<I: Iterator<Item = u8>> Iterator for TokenIter<I> {
     type Item = Span<Result<Token, LexerError>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        fn parse(first: u8, bytes: &[u8]) -> (Result<Token, LexerError>, usize) {
-            fn parse_number_literal(bytes: &[u8]) -> (Result<Token, LexerError>, usize) {
-                let bytes = (0..)
-                    .map_while(|i| {
-                        bytes
-                            .get(i)
-                            .filter(|byte| matches!(byte, b'0'..=b'9' | b'.'))
-                            .copied()
-                    })
-                    .collect::<Vec<_>>();
-
-                let len = bytes.len();
-                let Ok(value) = String::from_utf8(bytes) else {
-                    return (Err(LexerError::NonUtf8Bytes), len);
-                };
-
-                if value.bytes().all(|byte| matches!(byte, b'0'..=b'9')) {
-                    return (
-                        Ok(Token::Literal {
-                            value,
-                            kind: LiteralKind::Int,
-                        }),
-                        len,
-                    );
-                }
-
-                if value
-                    .bytes()
-                    .try_fold(false, |found_dot, byte| match byte {
-                        b'.' => {
-                            if found_dot {
-                                None
-                            } else {
-                                Some(true)
-                            }
-                        }
-                        b'0'..=b'9' => Some(found_dot),
-                        _ => None,
-                    })
-                    .is_some()
-                {
-                    return (
-                        Ok(Token::Literal {
-                            value,
-                            kind: LiteralKind::Float,
-                        }),
-                        len,
-                    );
-                }
-
-                (Err(LexerError::NumberLiteralParseError), len)
-            }
-
-            match first {
-                // Identifiers and keywords:
-                // --------------------------@
-                b'a'..=b'z' | b'A'..=b'Z' => {
-                    let bytes = (0..)
-                        .map_while(|i| {
-                            bytes
-                                .get(i)
-                                .filter(|byte| matches!(byte, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_'))
-                                .copied()
-                        })
-                        .collect::<Vec<_>>();
-
-                    let len = bytes.len();
-                    let Ok(string) = String::from_utf8(bytes) else {
-                        return (Err(LexerError::NonUtf8Bytes), len);
-                    };
-
-                    if let Ok(keyword) = string.parse() {
-                        return (Ok(Token::Keyword(keyword)), len);
-                    }
-
-                    (Ok(Token::Ident(string)), len)
-                }
-                // Literals:
-                // --------@
-                b'"' => {
-                    // TODO: Add support for escape characters.
-                    let bytes = (1..)
-                        .map_while(|i| bytes.get(i).filter(|byte| **byte != b'"').copied())
-                        .collect::<Vec<_>>();
-
-                    let len = bytes.len() + 2;
-                    let Ok(value) = String::from_utf8(bytes) else {
-                        return (Err(LexerError::NonUtf8Bytes), len);
-                    };
-
-                    (
-                        Ok(Token::Literal {
-                            value,
-                            kind: LiteralKind::String,
-                        }),
-                        len,
-                    )
-                }
-                b'0'..=b'9' => parse_number_literal(bytes),
-                // Braces:
-                //---------------------@
-                b'{' => (
-                    Ok(Token::Brace {
-                        open: true,
-                        kind: BraceKind::Curly,
-                    }),
-                    1,
-                ),
-                b'}' => (
-                    Ok(Token::Brace {
-                        open: false,
-                        kind: BraceKind::Curly,
-                    }),
-                    1,
-                ),
-                b'(' => (
-                    Ok(Token::Brace {
-                        open: true,
-                        kind: BraceKind::Smooth,
-                    }),
-                    1,
-                ),
-                b')' => (
-                    Ok(Token::Brace {
-                        open: false,
-                        kind: BraceKind::Smooth,
-                    }),
-                    1,
-                ),
-                b'[' => (
-                    Ok(Token::Brace {
-                        open: true,
-                        kind: BraceKind::Square,
-                    }),
-                    1,
-                ),
-                b']' => (
-                    Ok(Token::Brace {
-                        open: false,
-                        kind: BraceKind::Square,
-                    }),
-                    1,
-                ),
-                // Other:
-                // -------------------------------------@
-                b':' => {
-                    if let Some(b'=') = bytes.get(1) {
-                        (Ok(Token::Assignment(AssignmentKind::Normal)), 2)
-                    } else {
-                        (Ok(Token::Colon), 1)
-                    }
-                }
-                b'?' => {
-                    if let Some(b'=') = bytes.get(1) {
-                        (Ok(Token::Assignment(AssignmentKind::Optional)), 2)
-                    } else {
-                        (Ok(Token::QuestionMark), 1)
-                    }
-                }
-                b';' => (Ok(Token::SemiColon), 1),
-                b'&' => (Ok(Token::Ampersand), 1),
-                b',' => (Ok(Token::Comma), 1),
-                b'=' => (Ok(Token::Eq), 1),
-                b'-' => {
-                    if let Some(b'>') = bytes.get(1) {
-                        (Ok(Token::Arrow), 2)
-                    } else {
-                        (
-                            Err(LexerError::ExpectedCharacter {
-                                expected: b'>' as char,
-                                found: bytes.get(1).map(|byte| *byte as char),
-                            }),
-                            2,
-                        )
-                    }
-                }
-                b'.' => {
-                    if matches!(bytes.get(1), Some(b'0'..=b'9')) {
-                        parse_number_literal(bytes)
-                    } else {
-                        (Ok(Token::Dot), 1)
-                    }
-                }
-                byte => (Err(LexerError::UnexpectedCharacter(byte as char)), 1),
-            }
-        }
-
         // Skip any whitespace.
-        while self.bytes.first()?.is_ascii_whitespace() {
-            self.bytes = &self.bytes[1..];
+        while self.peek_byte()?.is_ascii_whitespace() {
+            _ = self.next_byte();
         }
 
         // Skip comments.
-        while (b'/', b'/') == (*self.bytes.get(0)?, *self.bytes.get(1)?) {
-            self.bytes = &self.bytes[2..];
-            while *self.bytes.first()? != b'\n' {
-                self.bytes = &self.bytes[1..];
+        loop {
+            if self.peek_byte()? != b'#' {
+                break;
+            }
+            _ = self.next_byte();
+
+            match self.next_byte()? {
+                b'!' => loop {
+                    if self.next_byte()? != b'!' {
+                        continue;
+                    }
+
+                    if self.peek_byte()? == b'#' {
+                        break;
+                    }
+                },
+                b'\n' => {}
+                _ => while self.next_byte()? != b'\n' {},
             }
 
             // Skip any whitespace after comments.
-            while self.bytes.first()?.is_ascii_whitespace() {
-                self.bytes = &self.bytes[1..];
+            while self.peek_byte()?.is_ascii_whitespace() {
+                _ = self.next_byte();
             }
         }
 
-        // The starting index of the next token.
-        let index = self.len - self.bytes.len();
-        let (token, len) = parse(self.bytes.first().copied()?, self.bytes);
-
-        self.bytes = &self.bytes[len.min(self.bytes.len())..];
-        Some(token.spanned(index, len))
+        let start = self.index;
+        let byte = self.next_byte()?;
+        let token = self.next_token(byte);
+        Some(token.spanned(start..self.index))
     }
 }

@@ -1,0 +1,8 @@
+main := fn () {
+    x := test();
+}
+
+test := fn () -> float {
+    x := 0.2.floor() as int;
+    2 * x
+}
