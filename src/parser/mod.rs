@@ -7,7 +7,7 @@ use crate::{
 use item::Item;
 use std::iter::Peekable;
 
-use self::item::{Block, FnArg, ItemKind};
+use self::item::{Block, FnArg, ItemKind, Ty};
 
 pub fn parse<I, T>(tokens: T) -> ItemIter<I>
 where
@@ -32,17 +32,53 @@ pub struct ItemIter<I: Iterator<Item = Spanned<Token>>> {
 }
 
 impl<I: Iterator<Item = Spanned<Token>>> ItemIter<I> {
-    pub fn peek_token<'a>(&'a mut self) -> Option<&'a Spanned<Token>> {
+    fn peek_token<'a>(&'a mut self) -> Option<&'a Spanned<Token>> {
         self.tokens.peek()
     }
 
-    pub fn next_token(&mut self) -> Option<Spanned<Token>> {
+    fn next_token(&mut self) -> Option<Spanned<Token>> {
         let token = self.tokens.next()?;
-        self.index = token.end;
+        self.index = match self.peek_token() {
+            Some(Spanned { start, .. }) => *start,
+            None => token.end,
+        };
+
         Some(token)
     }
 
-    pub fn next_item(&mut self, token: Spanned<Token>) -> Result<Item, ParseError> {
+    fn next_ty(&mut self) -> Result<Ty, ParseError> {
+        let ident = match self.next_token() {
+            Some(Spanned {
+                start,
+                end,
+                value: Token::Ident(ident),
+            }) => ident.span(start..end),
+            _ => {
+                return Err(ParseError::Lazy(
+                    "Expected a type."
+                        .to_owned()
+                        .span(self.index..self.index + 1),
+                ))
+            }
+        };
+
+        let optional = if matches!(
+            self.peek_token(),
+            Some(Spanned {
+                value: Token::QuestionMark,
+                ..
+            })
+        ) {
+            _ = self.next_token();
+            true
+        } else {
+            false
+        };
+
+        Ok(Ty { ident, optional })
+    }
+
+    fn next_item(&mut self, token: Spanned<Token>) -> Result<Item, ParseError> {
         match token {
             Spanned {
                 start,
@@ -161,7 +197,6 @@ impl<I: Iterator<Item = Spanned<Token>>> ItemIter<I> {
                     };
 
                     let Some(Spanned {
-                        end,
                         value: Token::Colon,
                         ..
                     }) = self.next_token()
@@ -171,20 +206,10 @@ impl<I: Iterator<Item = Spanned<Token>>> ItemIter<I> {
                         ));
                     };
 
-                    let ty = match self.next_token() {
-                        Some(Spanned {
-                            start,
-                            end,
-                            value: Token::Ident(ident),
-                        }) => ident.span(start..end),
-                        _ => {
-                            return Err(ParseError::Lazy(
-                                "Expected a type.".to_owned().span(end..end + 1),
-                            ))
-                        }
-                    };
-
-                    args.push(FnArg { ident, ty })
+                    args.push(FnArg {
+                        ident,
+                        ty: self.next_ty()?,
+                    })
                 }
 
                 let Some(Spanned {
@@ -210,19 +235,7 @@ impl<I: Iterator<Item = Spanned<Token>>> ItemIter<I> {
                 }) = self.peek_token()
                 {
                     _ = self.next_token();
-                    let Some(Spanned {
-                        start,
-                        end,
-                        value: Token::Ident(ident),
-                        ..
-                    }) = self.next_token()
-                    else {
-                        return Err(ParseError::Lazy(
-                            "Expected type or \"{\".".to_owned().span(end..end + 1),
-                        ));
-                    };
-
-                    Some(ident.span(start..end))
+                    Some(self.next_ty()?)
                 } else {
                     None
                 };
@@ -256,6 +269,7 @@ impl<I: Iterator<Item = Spanned<Token>>> ItemIter<I> {
                     }
 
                     // TODO: Make this actually parse statements.
+                    // Right now it just ignores everything...
                     self.next_token();
                 }
 

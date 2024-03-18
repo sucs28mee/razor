@@ -14,15 +14,21 @@ pub struct Item {
 pub enum ItemKind {
     Fn {
         args: Vec<FnArg>,
-        ty: Option<Spanned<String>>,
+        ty: Option<Ty>,
         block: Block,
     },
 }
 
 #[derive(Debug, Clone)]
+pub struct Ty {
+    pub ident: Spanned<String>,
+    pub optional: bool,
+}
+
+#[derive(Debug, Clone)]
 pub struct FnArg {
     pub ident: Spanned<String>,
-    pub ty: Spanned<String>,
+    pub ty: Ty,
 }
 
 #[derive(Debug, Clone)]
@@ -32,10 +38,18 @@ pub struct Block {
 }
 
 #[derive(Debug, Clone)]
-pub enum Statement {}
+pub enum Statement {
+    VariableInit {
+        ident: Spanned<String>,
+        expr: ExprTree<Value, Operator>,
+    },
+}
 
 #[derive(Debug, Clone)]
 pub enum Value {
-    Ident(String),
-    Literal { value: String, kind: LiteralKind },
+    Ident(Spanned<String>),
+    Literal {
+        value: Spanned<String>,
+        kind: LiteralKind,
+    },
 }

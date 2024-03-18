@@ -1,8 +1,8 @@
-main := fn () {
+main := fn() {
     x := 10;
     print(div(5, x));
 }
 
-div := fn (x: int, y: int) -> int {
+div := fn(x: int, y: int) -> int? {
     x / y
 }

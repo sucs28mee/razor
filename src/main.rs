@@ -49,6 +49,6 @@ fn main() {
         println!("{:?}", item);
     }
 
-    let code = codegen::gen_c(items);
+    let code = codegen::gen_c(items).expect("Couldn't generate code.");
     println!("{code}");
 }
