@@ -1,3 +1,5 @@
+test := import "test.rzr"
+
 main := fn () {
     println("Hello world!");
     node := Node.new(.2);

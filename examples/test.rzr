@@ -1,8 +1,8 @@
 main := fn () {
-    x := test();
+    x := 10;
+    print(div(5, x));
 }
 
-test := fn () -> float {
-    x := 0.2.floor() as int;
-    2 * x
+div := fn (x: int, y: int) -> int {
+    x / y
 }

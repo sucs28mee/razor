@@ -1,6 +1,8 @@
-use std::{iter::Peekable, str::FromStr};
+pub mod token;
 
 use crate::util::{Span, Spanned};
+use std::iter::Peekable;
+use token::{Assignment, BraceKind, LiteralKind, Operator, Token};
 
 pub fn tokenize<I, B>(bytes: B) -> TokenIter<I>
 where
@@ -11,85 +13,6 @@ where
         bytes: bytes.into_iter().peekable(),
         index: 0,
     }
-}
-
-#[derive(Debug, Clone)]
-pub enum Token {
-    Ident(String),
-    Assignment(AssignmentKind),
-    Eq,
-    Brace { open: bool, kind: BraceKind },
-    QuestionMark,
-    SemiColon,
-    Colon,
-    Dot,
-    Ampersand,
-    Comma,
-    Literal { value: String, kind: LiteralKind },
-    Keyword(Keyword),
-    Arrow,
-    Operator(Operator),
-}
-
-#[derive(Debug, Clone)]
-pub enum Operator {
-    Plus,
-    Minus,
-    Star,
-    Slash,
-}
-
-#[derive(Debug, Clone)]
-pub enum Keyword {
-    Struct,
-    Fn,
-    For,
-    Pub,
-    If,
-    Else,
-    Get,
-    As,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct UnknownKeywordError;
-
-impl FromStr for Keyword {
-    type Err = UnknownKeywordError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "struct" => Ok(Keyword::Struct),
-            "fn" => Ok(Keyword::Fn),
-            "for" => Ok(Keyword::For),
-            "pub" => Ok(Keyword::Pub),
-            "if" => Ok(Keyword::If),
-            "else" => Ok(Keyword::Else),
-            "get" => Ok(Keyword::Get),
-            "as" => Ok(Keyword::As),
-            _ => Err(UnknownKeywordError),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum AssignmentKind {
-    Normal,
-    Optional,
-}
-
-#[derive(Debug, Clone)]
-pub enum LiteralKind {
-    String,
-    Int,
-    Float,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum BraceKind {
-    Curly,
-    Square,
-    Smooth,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -236,13 +159,12 @@ impl<I: Iterator<Item = u8>> TokenIter<I> {
                 open: false,
                 kind: BraceKind::Square,
             }),
-
             // Other:
             // -------------------------------------@
             b':' => {
                 if let Some(b'=') = self.peek_byte() {
                     _ = self.next_byte();
-                    Ok(Token::Assignment(AssignmentKind::Normal))
+                    Ok(Token::Assignment(Assignment::Normal))
                 } else {
                     Ok(Token::Colon)
                 }
@@ -250,7 +172,7 @@ impl<I: Iterator<Item = u8>> TokenIter<I> {
             b'?' => {
                 if let Some(b'=') = self.peek_byte() {
                     _ = self.next_byte();
-                    Ok(Token::Assignment(AssignmentKind::Optional))
+                    Ok(Token::Assignment(Assignment::Optional))
                 } else {
                     Ok(Token::QuestionMark)
                 }
@@ -268,7 +190,7 @@ impl<I: Iterator<Item = u8>> TokenIter<I> {
 }
 
 impl<I: Iterator<Item = u8>> Iterator for TokenIter<I> {
-    type Item = Span<Result<Token, LexerError>>;
+    type Item = Result<Spanned<Token>, Spanned<LexerError>>;
 
     fn next(&mut self) -> Option<Self::Item> {
         // Skip any whitespace.
@@ -305,7 +227,9 @@ impl<I: Iterator<Item = u8>> Iterator for TokenIter<I> {
 
         let start = self.index;
         let byte = self.next_byte()?;
-        let token = self.next_token(byte);
-        Some(token.spanned(start..self.index))
+        Some(match self.next_token(byte) {
+            Ok(token) => Ok(token.span(start..self.index)),
+            Err(error) => Err(error.span(start..self.index)),
+        })
     }
 }
